@@ -1,0 +1,118 @@
+---
+title: "Net Migration Projection Notebook"
+author: "Rob Kemp and Cindy DeGroen - State Demography Office"
+date: "March 8, 2016"
+output: 
+   html_document:
+       css: J:/Estimates/Admin/AppDevelopment/journal-chicago/css/journal-chicago.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy=TRUE)
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(codemog)
+library(forecast)
+library(purrr)
+library(broom)
+
+
+load("input_data/county_migration.rdata")
+
+econ=readxl::read_excel("input_data/ForecastVariables.xls")%>%
+  gather(year,value, -Variable)%>%
+  spread(Variable, value)%>%
+  rename(laggedChange=Change)%>%
+  mutate(year=as.numeric(year),
+         laggedUR=lag(COvsUSUnemployment))
+```
+
+# Introduction
+
+The main goal of this project is the evaluate different methods of projecting and estimating migration for use in the estimates evaluation process and for short term prejection used at meetings like GREC.  The notebook will walk through a variety of different methods and data analyses undertaken toward evaluating different ideas and feasibility.
+
+
+## Attempt 1: Basic ARIMA Methods
+### Data
+
+The data used for this ARIMA are found in the `county_migration.rdata` file.  The list of variables and definitions are below, but it is important to note that the net migration estimates are produced by the U.S. Census Bureau and represent their domestic and international net migration estimates summed to create an estimate of net migration, but then adding in GQ change to net migration.  These data are for each country from 1985 to 2014.
+
+Merged in are the Colorado and US average annual Unemployment Rates and their differences
+
+#### **Variables**
+
+**county_migration **
+
+* countyfips - County FIPS Number (without leading zeros)
+* county - County Name
+* year - Estimate Year (1985 to 2014)
+* householdpopulation - Population living in housing units rather than group quarters.
+* groupquarterspopultion - Population living in group quarters like dorms, prisons, or other group living facilities.
+* netmigration - Net Migration Estimate
+
+**Econ Data**
+
+* year
+* laggedChange - lagged BEA employment change
+* COvsUSUnemployment - US Unemployment Rate- CO Unemployment Rante
+* Jobs - BEA Jobs
+* laggedUR - Lagged COvsUSUnemployment
+
+#### **Raw Data**
+
+```{r}
+# DT::datatable(county_migration)
+```
+
+### Cleaning and Nesting the Data 
+
+In this step I'm creating a nested data frame that has one row per county and rest of the variables in a column of data frames.  This is done to make running ARIMA models for each county easier using the `purrr` package.  The data structure is also printed out below.  It is a bit different than often expected, but should make getting the output together cleaner.  This does not change the original data, it just creates a nested copy.  The `unnest` command from `tidyr` will undo this.  This data will be used for the arima by county. I also merge the economic data into the migration data in this section. Currently, there is no county-level data for the economic forecast, so this is omitted.
+
+```{r}
+
+county_migration=mutate(county_migration, netmigration=as.numeric(netmigration))
+
+
+
+co_mig=county_migration%>%
+  group_by(year)%>%
+  summarize(netmigration=sum(netmigration))%>%
+  bind_rows(data.frame(year=c(1976:1984), netmigration=c(19124,33144,64946,56464,28253,40591,50501,37111,3263)))%>%
+  inner_join(econ)%>%
+  filter(year<2014)%>%
+  arrange(year)
+
+# nested=tidyr::nest(county_migration, -countyfips, -county)
+# 
+# tbl_df(nested)
+
+```
+
+### ARIMA Runs
+
+An ARIMA model uses the time-series for the variable of interest as input and outputs the predicted values for a predefined set of future time points.  The variables used to move the forecast forward are from forecasts and estimates.
+
+#### State-level
+
+```{r}
+
+co_arima=auto.arima(co_mig$netmigration, xreg=as.matrix(cbind(co_mig$laggedChange, co_mig$COvsUSUnemployment )))
+
+
+forecast.Arima(co_arima,h=5, xreg=as.matrix(cbind(c(73000, 67000), c(1.2,1.2)) ))
+
+
+```
+
+
+#### County Level
+```{r}
+# arima=nested%>%
+#   mutate(arima1=map(.$data,~Arima(.$netmigration)),
+#          arima_glance=map(.$arima1, ~glance())
+#   )
+
+```
+
